@@ -1,0 +1,27 @@
+// Checks on the source files themselves, for rules that a unit test cannot see.
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { config } from '../src/config.js';
+
+const root = new URL('../', import.meta.url);
+const read = (path) => readFileSync(new URL(path, root), 'utf8');
+const sourceFiles = readdirSync(new URL('src/', root)).map((name) => `src/${name}`);
+
+describe('source files', () => {
+  it('never use innerHTML or outerHTML (text goes on the page with textContent)', () => {
+    for (const file of [...sourceFiles, 'index.html']) {
+      assert.doesNotMatch(read(file), /innerHTML|outerHTML|insertAdjacentHTML/, file);
+    }
+  });
+
+  it('app.js gets the game rules from config instead of hard-coding them', () => {
+    const app = read('src/app.js');
+    assert.match(app, /config\.secondsPerQuestion/);
+    assert.doesNotMatch(app, new RegExp(`\\b${config.secondsPerQuestion}\\b`));
+  });
+
+  it('the README states the same seconds per question as config.js', () => {
+    assert.match(read('README.md'), new RegExp(`${config.secondsPerQuestion} seconds`));
+  });
+});
