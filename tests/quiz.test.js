@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuiz, percentage, shuffle, validateQuestions } from '../src/quiz.js';
-import { questions } from '../src/questions.js';
+import { questionsByDifficulty } from '../src/questions.js';
 import { config } from '../src/config.js';
 
 const sample = () => [
@@ -20,9 +20,11 @@ const correctOf = (quiz) => sample().find((q) => q.question === quiz.getState().
 const wrongOf = (quiz) => quiz.getState().options.find((o) => o !== correctOf(quiz));
 
 describe('validateQuestions', () => {
-  it('accepts the real game questions (10 of them)', () => {
-    assert.deepEqual(validateQuestions(questions), []);
-    assert.equal(questions.length, 10);
+  it('accepts the real game questions (10 for every difficulty)', () => {
+    for (const [level, list] of Object.entries(questionsByDifficulty)) {
+      assert.deepEqual(validateQuestions(list), [], level);
+      assert.equal(list.length, 10, level);
+    }
   });
 
   it('rejects an empty list with a clear message', () => {

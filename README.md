@@ -1,17 +1,35 @@
 # JavaScript Quiz Game
 
-A 10-question multiple-choice quiz about JavaScript (let/const, arrays, map/filter/reduce,
-closures, `this` and the event loop), built with plain JavaScript, HTML and CSS. It uses no
-frameworks, no libraries and no npm packages.
+A multiple-choice quiz about JavaScript (let/const, arrays, map/filter/reduce, closures, `this`
+and the event loop) with three difficulty levels, built with plain JavaScript, HTML and CSS.
+It uses no frameworks, no libraries and no npm packages.
 
 The game has three screens:
 
-1. **Start**: number of questions, time per question and the current high score.
-2. **Question**: question text, 4 answer buttons, score, question number (`3 / 10`) and a
-   15 seconds countdown. After an answer (or when time runs out) all buttons are disabled,
-   the correct answer is marked with colour **and** text (`(correct answer)` / `(your answer)`),
+1. **Start**: choose **Easy**, **Medium** or **Hard**. Each choice shows its number of
+   questions, its time per question and its own high score. Medium is selected by default.
+2. **Question**: the level, question text, 4 answer buttons, score, question number (`3 / 10`)
+   and a countdown. After an answer (or when time runs out) all buttons are disabled, the
+   correct answer is marked with colour **and** text (`(correct answer)` / `(your answer)`),
    and a **Next** button appears.
-3. **End**: final score, percentage, high score (saved in `localStorage`) and **Play again**.
+3. **End**: the level, final score, percentage, the high score **for that level** (saved in
+   `localStorage`), **Play again** (same level) and **Change difficulty** (back to the start).
+
+## Difficulty levels
+
+| Level | Time per question | Questions |
+|---|---|---|
+| Easy | 20 seconds | 10 basic questions: comments, `console.log`, `let`, array index, `push`, types, `===` |
+| Medium | 15 seconds | 10 questions on `const`/`let` scope, `map`, `filter`, `reduce`, closures, `this` and timers |
+| Hard | 10 seconds | 10 tricky questions: `typeof null`, `[1, 2, 3] + [4]`, promise vs timer order, `var` in a loop, `sort()` on numbers, `0.1 + 0.2` |
+
+**Harder means harder questions and less time.** Every level has its **own high score**, so a
+10 / 10 on Easy can never replace a Hard record. Each level's time lives only in
+`src/config.js`. A test fails if this table and `config.js` disagree.
+
+Scores saved by the first version of the game (before levels existed) used a single key,
+`quizGame.highScore`. The new keys are `quizGame.highScore.easy`, `.medium` and `.hard`, so that
+old score is ignored instead of being mixed into a level it did not belong to.
 
 ## Requirements
 
@@ -46,9 +64,10 @@ The countdown tests use `mock.timers`, so they finish instantly instead of waiti
 | Test file | What it checks |
 |---|---|
 | `tests/quiz.test.js` | validation, shuffle, answering, time up, next, restart, score limits, percentage |
+| `tests/levels.test.js` | the level rules, unknown levels, each level's questions and time, separate high scores |
 | `tests/timer.test.js` | the countdown on its own, and the countdown wired to the quiz the same way `app.js` does |
 | `tests/storage.test.js` | reading and saving the high score with a fake storage and a storage that throws |
-| `tests/source.test.js` | no `innerHTML` anywhere, no hard-coded rule numbers in `app.js`, README matches `config.js` |
+| `tests/source.test.js` | no `innerHTML` anywhere, no hard-coded times or level names in `app.js`, README table matches `config.js` |
 
 ## How the code is organised
 
@@ -56,8 +75,10 @@ The countdown tests use `mock.timers`, so they finish instantly instead of waiti
 quiz-game/
   index.html          the three screens; loads src/app.js as a module
   style.css           layout, colours, phone-width rules
-  src/config.js       the ONE config object: secondsPerQuestion, pointsPerCorrect, storageKey
-  src/questions.js    the 10 questions as { question, options, answer }
+  src/config.js       the ONE config object: difficulties (label + seconds), defaultDifficulty,
+                      pointsPerCorrect, storageKey
+  src/questions.js    questionsByDifficulty: 10 questions per level as { question, options, answer }
+  src/levels.js       level rules, no DOM: getDifficulty, highScoreKey, validateLevels, createLevelGame
   src/quiz.js         game rules, no DOM: validateQuestions, shuffle, percentage, createQuiz
   src/timer.js        createCountdown(seconds, onTick, onEnd) with start / stop / isRunning
   src/storage.js      getHighScore / saveHighScore, the storage object is passed in
@@ -67,20 +88,69 @@ quiz-game/
 
 **Why the logic is separate from the DOM.** Node has no `document`, so any rule written inside
 `app.js` could only be tested by clicking in a browser. All decisions (is this answer allowed,
-is it correct, what is the score, is a high score valid) live in `quiz.js`, `timer.js` and
-`storage.js`, which never touch the page. `app.js` only asks for the state and draws it.
+is it correct, what is the score, is a high score valid, is this a real level) live in
+`quiz.js`, `levels.js`, `timer.js` and `storage.js`, which never touch the page. `app.js` only asks for the state and draws it.
 The tests can then call the same functions the page uses.
 
 **Why one config object.** In Week 1 my grading scale (the D grade) and my bank rules were
 different between days, because the same rule was written down in more than one place. So this
-time every rule lives in one config object: `src/config.js` is the only place rules are written. `quiz.js`,
+time every rule lives in one config object: `src/config.js` is the only place rules are written. `levels.js`,
 `storage.js` and `app.js` import it, and `tests/source.test.js` fails if `app.js` hard-codes
-the seconds or if this README states a different number of seconds than `config.js`.
+a level's seconds or name, or if this README states a different time than `config.js`.
 
 **Why things are passed in (dependency injection).** `shuffle` takes a `random` function,
 `createQuiz` takes a `timer`, and the storage functions take a `storage` object. The page
 passes `Math.random`, a real countdown and `window.localStorage`. Tests pass a fixed
 "random", fake timers and a fake storage, so results are the same every run.
+
+## How the levels work
+
+`quiz.js` and `timer.js` did not need to change for the levels: `createQuiz` already accepts
+any list of questions, and `createCountdown` already accepts any number of seconds. So a level
+is just **which questions** and **how many seconds**. `src/levels.js` puts those two together.
+
+**Checking the level name.** Every entry point goes through `getDifficulty`, so an unknown name
+can never start a game:
+
+```js
+export function getDifficulty(name) {
+  if (typeof name !== 'string' || !Object.hasOwn(config.difficulties, name)) {
+    throw new RangeError(
+      `Unknown difficulty ${describe(name)}. Choose one of: ${difficultyNames.join(', ')}.`,
+    );
+  }
+  return { name, ...config.difficulties[name] };
+}
+```
+
+- `Object.hasOwn` is used instead of `name in config.difficulties`, because `in` also finds
+  names that every object inherits, like `"toString"` or `"constructor"`. Those must be rejected.
+- `{ name, ...config.difficulties[name] }` returns a **copy**, so code that changes the result
+  cannot change the rules.
+
+**One high score per level.** The key includes the level, so the three records never mix:
+
+```js
+export const highScoreKey = (name) => `${config.storageKey}.${getDifficulty(name).name}`;
+```
+
+**One game per level.** Each game gets its own countdown with that level's time:
+
+```js
+export function createLevelGame(name, questionsByDifficulty, { onTick, onTimeUp, random } = {}) {
+  const difficulty = getDifficulty(name);
+  const timer = createCountdown(difficulty.secondsPerQuestion, onTick, onTimeUp);
+```
+
+In `app.js`, a new game first stops the previous game's timer, so changing level can never leave
+two timers running. **Play again** starts the same level again, and **Change difficulty** goes back
+to the start screen, which is drawn again each time so every level's high score is up to date.
+
+**Checking every level's questions.** `validateLevels` runs `validateQuestions` on each level and
+puts the level name in front of every problem (`"Hard: Question 3 has duplicate options."`). It
+also rejects questions for a level that does not exist and the same question used twice, even
+in two different levels. If anything is wrong, the start screen lists the problems and no game
+can start.
 
 ## How the timer works
 
@@ -123,29 +193,30 @@ change them, only `start` and `stop` can:
 - `stop()` checks `intervalId !== null`, so calling it when nothing is running does nothing.
 
 The quiz calls `timer.start()` in `start()` and `next()`, and `timer.stop()` as soon as a
-question is answered or timed out. `app.js` never starts or stops the timer itself, so the
+question is answered or timed out. The number of seconds comes from the chosen level. `app.js` never starts or stops the timer itself, so the
 page cannot forget to.
 
 ## Week 1 concepts used in this project
 
 | Concept | Where | Why it is used there |
 |---|---|---|
-| `const` / `let` | `src/quiz.js:77` (`let rounds`), `src/config.js:3` (`const config`) | `const` for things that are never reassigned. `let` only for state that must change (`rounds`, `index`, `score`, `status`). |
+| `const` / `let` | `src/quiz.js:77` (`let rounds`), `src/config.js:4` (`const config`) | `const` for things that are never reassigned. `let` only for state that must change (`rounds`, `index`, `score`, `status`). |
 | Functions | `src/quiz.js:6` `validateQuestions`, `src/quiz.js:64` `createQuiz` | Each rule has a name and one job, so it can be tested on its own. |
 | Arrow functions | `src/quiz.js:3` `isBlank`, `src/timer.js:23` interval callback | Short callbacks. In the interval, an arrow function keeps access to `remaining` from the closure. |
-| Objects | `src/config.js:3` `config`, `src/questions.js` question objects | Group related values under clear names (`config.secondsPerQuestion`). `Object.freeze` stops changes at run time. |
-| Arrays | `src/questions.js` list of questions, `options` arrays | Ordered lists that can be shuffled and looped over. |
-| `map` | `src/quiz.js:87` copy of each question, `src/app.js:83` one button per option | Turn every item into a new item without changing the original. |
+| Objects | `src/config.js:4` `config`, `src/config.js:5` `difficulties`, `src/questions.js` question objects | Group related values under clear names (`config.difficulties.hard.secondsPerQuestion`). `Object.freeze` stops changes at run time. |
+| Arrays | `src/questions.js` one list of questions per level, `options` arrays | Ordered lists that can be shuffled and looped over. |
+| `map` | `src/quiz.js:87` copy of each question, `src/app.js:86` one button per option | Turn every item into a new item without changing the original. |
 | `filter` | `src/quiz.js:28` `options.filter(isBlank)` | Find empty options to report them. |
+| `flatMap` | `src/levels.js:29` every level's problems in one list | Like `map`, but each level can give 0, 1 or many problems, and they end up in one flat list. |
 | `reduce` | `src/quiz.js:14` `questions.reduce(...)` | Collect the problems from every question into one error list. |
-| Destructuring | `src/quiz.js:20` `const { question, options, answer } = item`, `src/app.js:97` | Pull out only the fields needed, with readable names. |
-| Spread | `src/quiz.js:45` `[...items]`, `src/quiz.js:87` `{ ...q, options }`, `src/quiz.js:154` | Make copies so the original questions and the internal state are never changed from outside. |
+| Destructuring | `src/quiz.js:20` `const { question, options, answer } = item`, `src/app.js:99`, `src/app.js:153` `{ label, secondsPerQuestion }` | Pull out only the fields needed, with readable names. |
+| Spread | `src/quiz.js:45` `[...items]`, `src/quiz.js:87` `{ ...q, options }`, `src/quiz.js:154`, `src/levels.js:17` copy of a level | Make copies so the original questions and the internal state are never changed from outside. |
 | Modules | `import` lines at the top of `src/app.js:2-6`, `export` in every `src` file | Each file has one job and states what it needs. This also lets Node tests import the same code the page uses. |
 | Closures | `src/timer.js:8-9` `remaining` / `intervalId`, `src/quiz.js:77` quiz state inside `createQuiz` | Private state: only the returned functions can read or change it. |
-| `this` | `src/app.js:65` `handleAnswerClick` uses `this.dataset.option` | A regular function used as an event listener gets the clicked button as `this`, so one function serves all 4 buttons. An arrow function would not get it. |
+| `this` | `src/app.js:67` `handleAnswerClick` uses `this.dataset.option` | A regular function used as an event listener gets the clicked button as `this`, so one function serves all 4 buttons. An arrow function would not get it. |
 | Event loop / timers | `src/timer.js:23` `setInterval`, `src/timer.js:13` `clearInterval` | The countdown callback is queued by the browser and runs every second after other code finishes. |
-| DOM | `src/app.js:8` `$` (getElementById), `src/app.js:84` `createElement`, `textContent` throughout | Show the state on the page. Text is always set with `textContent`, never `innerHTML`, so question text can never be run as HTML. |
-| Events | `src/app.js:89` answer buttons, `src/app.js:169-171` start / restart / next | React to the player's clicks. |
+| DOM | `src/app.js:8` `$` (getElementById), `src/app.js:86` `createElement`, `textContent` throughout | Show the state on the page. Text is always set with `textContent`, never `innerHTML`, so question text can never be run as HTML. |
+| Events | `src/app.js:91` answer buttons, `src/app.js:228-237` start / restart / change difficulty / next | React to the player's clicks. |
 | `localStorage` | `src/storage.js:10` `getItem`, `src/storage.js:36` `setItem`, `src/app.js:17` `getStorage` | Keep the high score between visits. Every access is inside `try`/`catch` because private mode can throw. |
 
 ## Edge cases
@@ -182,6 +253,19 @@ page cannot forget to.
 | Tie with the old high score | Old record kept, message says it is a tie | `keeps the old high score on a tie and says so` |
 | Storage throws (private mode) | Game keeps working, score just is not saved | `returns 0 when storage throws or is missing`, `keeps the game working when storage throws` |
 | Impossible score to save (-1, 11, 2.5) | Not saved | `refuses to save an impossible score` |
+| Unknown level (`"expert"`, `""`, `"Easy"`, `"toString"`, `null`, a number) | `RangeError` that lists the real levels, no game starts | `rejects unknown names with a clear RangeError listing the choices`, `an unknown level throws before any timer or quiz is made` |
+| A level is missing or has no questions | Start screen lists the problem with the level name, no crash | `says which level is missing or empty`, `a level without questions throws the validation error` |
+| A broken question in one level | The problem names the level (`"Medium: Question 1 ..."`) | `labels a broken question with its level` |
+| Questions for a level that does not exist | Rejected | `rejects questions for a level that does not exist` |
+| The same question twice (same or different level) | Rejected | `rejects the same question used twice, inside a level or across levels` |
+| Each level's time | Easy 20 s, Medium 15 s, Hard 10 s, taken from `config.js` | `easy uses 20 seconds, medium 15, hard 10 (from config)` |
+| Play again | Same level, same time, fresh timer | `time runs out after exactly the level time, and Play again uses the same time` |
+| Changing level | The previous timer is stopped first, timers never run together | `two games have separate timers` |
+| A level's questions | Only that level's questions are played | `uses only the questions of the chosen level` |
+| High scores | One per level; a Hard score never changes Easy | `a Hard score never changes the Easy record` |
+| Tie | Keeps the old record of that level only | `a tie keeps the old record for that level only` |
+| The old single high score (from before levels) | Ignored, not mixed into a level | `the old single high score from before levels existed is ignored, not mixed in` |
+| Changing the rules while playing | Impossible, the config is frozen | `the rules cannot be changed while the game runs` |
 | HTML in text | Never used, all text uses `textContent` | `never use innerHTML or outerHTML (text goes on the page with textContent)` |
 
 The guard that makes double clicks, late clicks and clicks after the end safe is one check at
@@ -231,8 +315,10 @@ not enough:
 
 ## What I learned
 
-- Keeping rules out of the DOM file is what makes them testable. I could write 54 tests
+- Keeping rules out of the DOM file is what makes them testable. I could write 80 tests
   without a browser.
+- Because `createQuiz` and `createCountdown` already took their questions and seconds as inputs,
+  adding difficulty levels needed almost no change to the game logic, only a new `levels.js`.
 - Tests only prove something if they fail when the code is wrong. Breaking the code on purpose
   (double click counted twice, timer not cleared, `NaN` percentage, tie overwriting, and more)
   showed that every one was caught. It also found the hanging test.

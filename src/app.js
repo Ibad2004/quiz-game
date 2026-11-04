@@ -1,8 +1,8 @@
-// DOM only: this file reads the quiz state and draws it. All game rules live in quiz.js.
+// DOM only: this file reads the quiz state and draws it. All game rules live in quiz.js and levels.js.
 import { config } from './config.js';
-import { questions } from './questions.js';
-import { createQuiz, percentage, validateQuestions } from './quiz.js';
-import { createCountdown } from './timer.js';
+import { questionsByDifficulty } from './questions.js';
+import { percentage } from './quiz.js';
+import { createLevelGame, difficultyNames, getDifficulty, highScoreKey, validateLevels } from './levels.js';
 import { getHighScore, saveHighScore } from './storage.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,8 +28,8 @@ function showScreen(name) {
   });
 }
 
-function showErrors(errors) {
-  $('start-info').textContent = 'The quiz cannot start because the questions have problems:';
+function showErrors(intro, errors) {
+  $('start-info').textContent = intro;
   const list = $('error-list');
   list.replaceChildren(
     ...errors.map((message) => {
@@ -39,7 +39,6 @@ function showErrors(errors) {
     }),
   );
   list.hidden = false;
-  $('start-button').hidden = true;
 }
 
 // The visible timer is not a live region, otherwise a screen reader would read every second.
@@ -59,18 +58,21 @@ function renderStatus(state) {
   $('score').textContent = `Score: ${state.score}`;
 }
 
-let quiz = null;
+let game = null;
+let selectedDifficulty = config.defaultDifficulty;
+
+const maxScoreOf = (name) => questionsByDifficulty[name].length * config.pointsPerCorrect;
 
 // A regular function (not an arrow) so `this` is the button that was clicked.
 function handleAnswerClick() {
-  const result = quiz.answer(this.dataset.option);
+  const result = game.quiz.answer(this.dataset.option);
   if (result.accepted) {
     renderResult();
   }
 }
 
 function renderQuestion() {
-  const state = quiz.getState();
+  const state = game.quiz.getState();
   renderStatus(state);
   $('question-text').textContent = state.question;
   $('feedback').textContent = '';
@@ -93,7 +95,7 @@ function renderQuestion() {
 }
 
 function renderResult() {
-  const state = quiz.getState();
+  const state = game.quiz.getState();
   const { selected, correct, correctAnswer, timedOut } = state.lastResult;
   renderStatus(state);
 
@@ -123,56 +125,120 @@ function renderResult() {
 }
 
 function renderEnd() {
+  const { difficulty, quiz } = game;
   const { score, maxScore } = quiz.getState();
-  const { outcome, highScore } = saveHighScore(getStorage(), score, maxScore);
+  const { outcome, highScore } = saveHighScore(getStorage(), score, maxScore, highScoreKey(difficulty.name));
 
+  $('final-level').textContent = `Level: ${difficulty.label}`;
   $('final-score').textContent = `Your score: ${score} / ${maxScore}`;
   $('final-percentage').textContent = `That is ${percentage(score, maxScore)}%.`;
 
   const messages = {
-    new: `New high score: ${highScore}!`,
-    tie: `You tied the high score of ${highScore}. The old record stays.`,
-    lower: `High score: ${highScore}. Try again to beat it.`,
-    invalid: `High score: ${highScore}.`,
-    unavailable: `High score this session: ${highScore} (it could not be saved in this browser).`,
+    new: `New ${difficulty.label} high score: ${highScore}!`,
+    tie: `You tied the ${difficulty.label} high score of ${highScore}. The old record stays.`,
+    lower: `${difficulty.label} high score: ${highScore}. Try again to beat it.`,
+    invalid: `${difficulty.label} high score: ${highScore}.`,
+    unavailable: `${difficulty.label} high score this session: ${highScore} (it could not be saved in this browser).`,
   };
   $('high-score').textContent = messages[outcome];
   showScreen('end');
   $('restart-button').focus();
 }
 
-function startGame() {
-  quiz.start();
+// Draws one radio button per level, with its time and its own high score.
+// Called every time the start screen is shown, so the high scores are never out of date.
+function renderStartScreen() {
+  const storage = getStorage();
+  const options = difficultyNames.map((name) => {
+    const { label, secondsPerQuestion } = getDifficulty(name);
+    const total = questionsByDifficulty[name].length;
+    const best = getHighScore(storage, maxScoreOf(name), highScoreKey(name));
+
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'difficulty';
+    input.value = name;
+    input.checked = name === selectedDifficulty;
+
+    const title = document.createElement('span');
+    title.className = 'difficulty-name';
+    title.textContent = label;
+
+    const details = document.createElement('span');
+    details.className = 'difficulty-details';
+    details.textContent = `${total} questions, ${secondsPerQuestion} seconds each. High score: ${best} / ${total}`;
+
+    const text = document.createElement('span');
+    text.append(title, details);
+
+    const option = document.createElement('label');
+    option.className = 'difficulty-option';
+    option.append(input, text);
+    return option;
+  });
+
+  $('difficulty-options').replaceChildren(...options);
+  $('error-list').hidden = true;
+  $('start-info').textContent = 'Harder levels have harder questions and less time.';
+  $('difficulty-picker').hidden = false;
+  $('start-button').hidden = false;
+}
+
+function chosenDifficulty() {
+  const checked = document.querySelector('input[name="difficulty"]:checked');
+  return checked ? checked.value : config.defaultDifficulty;
+}
+
+function onTimeUp() {
+  if (game.quiz.timeUp().accepted) {
+    renderResult();
+  }
+}
+
+function startGame(name) {
+  // getDifficulty throws for an unknown name, so a broken choice can never start a game.
+  const difficulty = getDifficulty(name);
+  // Stop the previous game's timer before making a new one, so two timers never run at once.
+  game?.timer.stop();
+  game = createLevelGame(difficulty.name, questionsByDifficulty, { onTick: renderTime, onTimeUp });
+  selectedDifficulty = difficulty.name;
+
+  $('level-badge').textContent = difficulty.label;
+  game.quiz.start();
   renderQuestion();
   showScreen('question');
 }
 
+function showStartScreen() {
+  game?.timer.stop();
+  renderStartScreen();
+  showScreen('start');
+  document.querySelector('input[name="difficulty"]:checked')?.focus();
+}
+
 function init() {
-  const errors = validateQuestions(questions);
+  const errors = validateLevels(questionsByDifficulty);
   if (errors.length > 0) {
-    showErrors(errors);
+    showErrors('The quiz cannot start because the questions have problems:', errors);
     return;
   }
 
-  const timer = createCountdown(config.secondsPerQuestion, renderTime, () => {
-    if (quiz.timeUp().accepted) {
-      renderResult();
+  renderStartScreen();
+
+  $('start-button').addEventListener('click', () => {
+    try {
+      startGame(chosenDifficulty());
+    } catch (error) {
+      showErrors('That difficulty cannot be played:', [error.message]);
     }
   });
-  quiz = createQuiz(questions, { timer });
-
-  const best = getHighScore(getStorage(), questions.length * config.pointsPerCorrect);
-  $('start-info').textContent =
-    `${questions.length} questions, ${config.secondsPerQuestion} seconds each. High score: ${best}.`;
-  $('start-button').hidden = false;
-
-  $('start-button').addEventListener('click', startGame);
-  $('restart-button').addEventListener('click', startGame);
+  $('restart-button').addEventListener('click', () => startGame(game.difficulty.name));
+  $('change-difficulty-button').addEventListener('click', showStartScreen);
   $('next-button').addEventListener('click', () => {
-    if (!quiz.next()) {
+    if (!game.quiz.next()) {
       return;
     }
-    if (quiz.isFinished()) {
+    if (game.quiz.isFinished()) {
       renderEnd();
     } else {
       renderQuestion();

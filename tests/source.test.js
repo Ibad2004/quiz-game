@@ -17,11 +17,17 @@ describe('source files', () => {
 
   it('app.js gets the game rules from config instead of hard-coding them', () => {
     const app = read('src/app.js');
-    assert.match(app, /config\.secondsPerQuestion/);
-    assert.doesNotMatch(app, new RegExp(`\\b${config.secondsPerQuestion}\\b`));
+    assert.match(app, /secondsPerQuestion/);
+    for (const { label, secondsPerQuestion } of Object.values(config.difficulties)) {
+      assert.doesNotMatch(app, new RegExp(`\\b${secondsPerQuestion}\\b`), `app.js hard-codes ${secondsPerQuestion}`);
+      assert.doesNotMatch(app, new RegExp(`'${label}'`), `app.js hard-codes the label ${label}`);
+    }
   });
 
-  it('the README states the same seconds per question as config.js', () => {
-    assert.match(read('README.md'), new RegExp(`${config.secondsPerQuestion} seconds`));
+  it('the README states the same time per level as config.js', () => {
+    const readme = read('README.md');
+    for (const { label, secondsPerQuestion } of Object.values(config.difficulties)) {
+      assert.match(readme, new RegExp(`\\| ${label} \\| ${secondsPerQuestion} seconds \\|`), label);
+    }
   });
 });

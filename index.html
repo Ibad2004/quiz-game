@@ -13,14 +13,19 @@
       <h1>JavaScript Quiz</h1>
       <p id="start-info">Loading questions...</p>
       <ul id="error-list" class="error" hidden></ul>
+      <fieldset id="difficulty-picker" class="difficulty-picker" hidden>
+        <legend>Choose a difficulty</legend>
+        <div id="difficulty-options" class="difficulty-options"></div>
+      </fieldset>
       <button id="start-button" class="primary" type="button" hidden>Start quiz</button>
     </section>
 
     <section id="question-screen" class="screen" hidden>
       <div class="status-bar">
+        <span id="level-badge" class="level-badge"></span>
         <span id="question-number">1 / 10</span>
         <span id="score">Score: 0</span>
-        <span id="timer">15 s</span>
+        <span id="timer"></span>
       </div>
       <p id="timer-announcement" class="visually-hidden" aria-live="polite"></p>
       <h2 id="question-text"></h2>
@@ -31,10 +36,14 @@
 
     <section id="end-screen" class="screen" hidden>
       <h2>Quiz finished</h2>
+      <p id="final-level"></p>
       <p id="final-score"></p>
       <p id="final-percentage"></p>
       <p id="high-score"></p>
-      <button id="restart-button" class="primary" type="button">Play again</button>
+      <div class="end-actions">
+        <button id="restart-button" class="primary" type="button">Play again</button>
+        <button id="change-difficulty-button" class="secondary" type="button">Change difficulty</button>
+      </div>
     </section>
   </main>
 
